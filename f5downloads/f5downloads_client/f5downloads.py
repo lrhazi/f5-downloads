@@ -140,7 +140,8 @@ class F5Downloads:
             logger.info(f'{file} does not exist')
             return False
         with open(md5_file, 'r') as f:
-            md5sum = re.sub(r' .+\n$', '', f.read())
+            md5sum=f.read().strip().split()[0]
+            # md5sum = re.sub(r' .+\n$', '', f.read())
         file_sum = self.md5(file)
 
         return md5sum == file_sum
@@ -174,7 +175,7 @@ class F5Downloads:
                     'args': {'pattern': rf'BIG-IP v{version}.x.+'},
                 }, {
                 'f': self.follow_specific_link,
-                'args': {'pattern': r'GeoLocationUpdates', }
+                'args': {'pattern': r'GeoLocationUpdates_Pulse', }
             },
                 {
                     'f': self.download_files,

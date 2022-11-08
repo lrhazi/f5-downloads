@@ -1,3 +1,4 @@
+from datetime import datetime
 import requests, os, re
 from f5downloads.logger.logger import logger
 
@@ -22,12 +23,8 @@ class F5rest:
                 'password': self.password,
                 'loginProviderName': 'tmos'
             }
-
-            token_response = requests.post(
-                f'https://{self.device}/mgmt/shared/authn/login',
-                verify=self.verify_ssl,
-                auth=(self.username, self.password), json=body) \
-                .json()
+            r = requests.post(f'https://{self.device}/mgmt/shared/authn/login',verify=self.verify_ssl,auth=(self.username, self.password), json=body)
+            token_response = r.json()
 
             self._token = token_response['token']['token']
         return self._token
@@ -80,8 +77,8 @@ class F5rest:
         response = requests.post('https://' + self.device + '/mgmt/tm/util/bash', json=payload, verify=self.verify_ssl,
                                  headers=headers).json()
         if 'commandResult' in response:
-            logger.debug("Command result")
-            logger.debug(response['commandResult'])
+            logger.debug(f"{self.device}: Command: {command}")
+            logger.debug(f"{self.device}: Result: {response['commandResult']}")
             return re.sub('\n$', '', response['commandResult'])
         else:
             return None
@@ -104,29 +101,44 @@ class F5rest:
             raise (f'Unable to parse remote geoip db version from {file_name}')
         return local_version
 
+    def calculate_dates_difference(self, date1, date2):
+        date1 = datetime.strptime(date1, '%Y%m%d')
+        date2 = datetime.strptime(date2, '%Y%m%d')
+        return abs((date2 - date1).days)
+
     def update_geoip_db(self, file_path):
         file_name = os.path.basename(file_path)
 
         local_version = self.get_geoip_db_version_from_file(file_name)
         remote_version = self.get_geoip_db_version()
-
-        if local_version == remote_version:
-            logger.info('Newest version already exists on the device')
+        version_diff = self.calculate_dates_difference(local_version, remote_version)
+        #TODO: Hack. ideally versions should be identical. 
+        #   But for some reason the version in the filename is different than actual version inside library.
+        if version_diff== 0 or version_diff == 1:
+            logger.info(f"{self.device}: Newest version already exists on the device")
             return False
 
         if not self.test_remote_file('/var/tmp/update_geoipdb.sh'):
-            logger.info("Updating the geoip update shell script")
+            logger.info(f"{self.device}: Updating the geoip update shell script")
             self.upload_file('./update_geoipdb.sh')
             self.run_bash_command('mv /var/config/rest/downloads/update_geoipdb.sh /var/tmp/')
 
-        logger.info(f'Uploading {file_name}')
+        logger.info(f"{self.device}: Uploading {file_name}")
         self.upload_file(file_path)
         self.upload_file(f'{file_path}.md5')
 
         self.run_bash_command(f'bash /var/tmp/update_geoipdb.sh {file_name}')
 
         remote_version = self.get_geoip_db_version()
-        if local_version == remote_version:
+        version_diff = self.calculate_dates_difference(local_version, remote_version)
+        # TODO: Hack. ideally versions should be identical. 
+        #   But for some reason the version in the filename is different than actual version inside library.
+        if version_diff== 0:
+            return True
+        elif version_diff == 1:
+            logger.warning(f'{self.device}: Update might have failed. local_version={local_version} remote_version={remote_version}')
             return True
         else:
-            raise Exception('Failed to update the geoip database using {file_name}')
+            logger.warning(f'{self.device}: Update failed. local_version={local_version} remote_version={remote_version}')
+            return False
+
